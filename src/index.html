@@ -1,70 +1,74 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Canvas Resource Timeline (Sticky Axes)</title>
-  <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
-    #viewport {
-      width: 100%;
-      height: 100%;
-      overflow: auto;
-      background: #fff;
-    }
+<meta charset="utf-8" />
+<title>Canvas Resource Timeline</title>
 
-    /* content defines the scrollable extents */
-    #content {
-      display: flex;
-      flex-direction: column;
-      width: max-content;   /* expand to children width -> horizontal scroll */
-      height: max-content;  /* expand to children height -> vertical scroll */
-    }
+<style>
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
+}
 
-    /* sticky header row */
-    #header {
-      display: flex;
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      background: #f9fafb;
-    }
+#viewport {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: #fff;
+}
 
-    /* body row */
-    #bodyRow { display: flex; }
+#content {
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  height: max-content;
+}
 
-    /* sticky left axis */
-    #yAxisWrap {
-      position: sticky;
-      left: 0;
-      z-index: 40;
-      background: #f9fafb;
-      border-right: 1px solid #ccc;
-    }
+/* sticky header */
+#header {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #f9fafb;
+}
 
-    /* corner is inside sticky header, also sticky-left within the scroll container */
-    #cornerWrap {
-      position: sticky;
-      left: 0;
-      z-index: 60;
-      background: #f3f4f6;
-      border-right: 1px solid #ccc;
-      border-bottom: 1px solid #ccc;
-    }
+/* body */
+#bodyRow {
+  display: flex;
+}
 
-    #xAxisWrap {
-      background: #f9fafb;
-      border-bottom: 1px solid #ccc;
-    }
+/* sticky left axis */
+#yAxisWrap {
+  position: sticky;
+  left: 0;
+  z-index: 40;
+  background: #f9fafb;
+  border-right: 1px solid #ccc;
+}
 
-    #timelineWrap { background: #fff; }
+/* sticky corner */
+#cornerWrap {
+  position: sticky;
+  left: 0;
+  z-index: 60;
+  background: #f3f4f6;
+  border-right: 1px solid #ccc;
+  border-bottom: 1px solid #ccc;
+}
 
-    canvas { display: block; }
+#xAxisWrap {
+  border-bottom: 1px solid #ccc;
+}
 
-    /* optional: nicer text rendering */
-    .pixel { image-rendering: pixelated; }
-  </style>
+canvas {
+  display: block;
+}
+</style>
 </head>
+
 <body>
 
 <div id="viewport">
@@ -76,230 +80,207 @@
 
     <div id="bodyRow">
       <div id="yAxisWrap"><canvas id="yAxis"></canvas></div>
-      <div id="timelineWrap"><canvas id="timeline"></canvas></div>
+      <div><canvas id="timeline"></canvas></div>
     </div>
   </div>
 </div>
 
 <script>
 (() => {
-  /* =========================
-     CONFIG
-  ========================= */
-  const ROW_HEIGHT = 40;       // px
-  const HOUR_WIDTH = 80;       // px per hour tick
-  const AXIS_HEIGHT = 50;      // px
-  const AXIS_WIDTH = 220;      // px
-  const BAR_VPAD = 6;          // px
-  const FONT = "12px system-ui, sans-serif";
+/* ================= CONFIG ================= */
+const ROW_HEIGHT  = 40;
+const BAR_VPAD    = 16;      // thinner bars
+const HOUR_WIDTH  = 80;
+const AXIS_HEIGHT = 50;
+const AXIS_WIDTH  = 220;
+const FONT = "12px system-ui, sans-serif";
 
-  /* =========================
-     INPUTS (replace these)
-     resources: [{id, name}]
-     consumptions: [{id, resourceId, start, end}] (ms epoch)
-     range: [start, end] inclusive
-  ========================= */
-  const resources = Array.from({ length: 60 }, (_, i) => ({ id: "r" + i, name: "Resource " + i }));
-  const rangeStart = Date.now();
-  const rangeEnd = rangeStart + 1000 * 60 * 60 * 24; // 24h
+/* ================= DATA ================= */
+const resources = Array.from({ length: 50 }, (_, i) => ({
+  id: "r" + i,
+  name: "Resource " + i
+}));
 
-  const consumptions = Array.from({ length: 2500 }, (_, i) => {
-    const start = rangeStart + Math.random() * (rangeEnd - rangeStart - 2 * 3600e3);
-    return {
-      id: "c" + i,
-      resourceId: resources[Math.floor(Math.random() * resources.length)].id,
+const rangeStart = Date.now();
+const rangeEnd   = rangeStart + 24 * 3600e3; // 24h
+
+/* realistic consumptions: sequential per resource with gaps */
+const consumptions = [];
+const MS_PER_HOUR = 3600e3;
+
+for (const r of resources) {
+  let t = rangeStart + Math.random() * 2 * MS_PER_HOUR;
+
+  while (t < rangeEnd - MS_PER_HOUR) {
+    const duration = (1 + Math.random() * 3) * MS_PER_HOUR; // 1–4h
+    const gap = (0.5 + Math.random() * 2) * MS_PER_HOUR;    // idle
+
+    const start = t;
+    const end = Math.min(start + duration, rangeEnd);
+
+    consumptions.push({
+      id: `${r.id}-${start}`,
+      resourceId: r.id,
       start,
-      end: start + (1 + Math.random() * 6) * 3600e3
-    };
+      end
+    });
+
+    t = end + gap;
+  }
+}
+
+/* ================= DERIVED ================= */
+const totalHours = Math.ceil((rangeEnd - rangeStart) / MS_PER_HOUR);
+const timelineW = totalHours * HOUR_WIDTH;
+const timelineH = resources.length * ROW_HEIGHT;
+
+const resourceIndex = new Map(resources.map((r, i) => [r.id, i]));
+
+/* ================= CANVAS SETUP ================= */
+const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+function setupCanvas(canvas, cssW, cssH) {
+  canvas.style.width = cssW + "px";
+  canvas.style.height = cssH + "px";
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = FONT;
+  return ctx;
+}
+
+const corner   = document.getElementById("corner");
+const xAxis    = document.getElementById("xAxis");
+const yAxis    = document.getElementById("yAxis");
+const timeline = document.getElementById("timeline");
+
+const cornerCtx = setupCanvas(corner, AXIS_WIDTH, AXIS_HEIGHT);
+const xAxisCtx  = setupCanvas(xAxis, timelineW, AXIS_HEIGHT);
+const yAxisCtx  = setupCanvas(yAxis, AXIS_WIDTH, timelineH);
+const tlCtx     = setupCanvas(timeline, timelineW, timelineH);
+
+/* ================= UTILS ================= */
+const timeToX = t =>
+  ((t - rangeStart) / (rangeEnd - rangeStart)) * timelineW;
+
+/* ================= HIT TEST ================= */
+const rects = [];
+
+function hitTest(x, y) {
+  for (let i = rects.length - 1; i >= 0; i--) {
+    const r = rects[i];
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)
+      return r.id;
+  }
+  return null;
+}
+
+/* ================= RENDER ================= */
+let selectedId = null;
+
+function drawCorner() {
+  cornerCtx.clearRect(0, 0, AXIS_WIDTH, AXIS_HEIGHT);
+  cornerCtx.textBaseline = "middle";
+  cornerCtx.fillText("Resources / Time", 10, AXIS_HEIGHT / 2);
+}
+
+function drawXAxis() {
+  xAxisCtx.clearRect(0, 0, timelineW, AXIS_HEIGHT);
+  xAxisCtx.textAlign = "center";
+  xAxisCtx.textBaseline = "middle";
+
+  for (let i = 0; i <= totalHours; i++) {
+    const x = i * HOUR_WIDTH;
+    const d = new Date(rangeStart + i * MS_PER_HOUR);
+    const label = String(d.getHours()).padStart(2, "0") + ":00";
+    xAxisCtx.fillText(label, x + HOUR_WIDTH / 2, AXIS_HEIGHT / 2);
+  }
+}
+
+function drawYAxis() {
+  yAxisCtx.clearRect(0, 0, AXIS_WIDTH, timelineH);
+  yAxisCtx.textBaseline = "middle";
+
+  resources.forEach((r, i) => {
+    yAxisCtx.fillText(r.name, 10, i * ROW_HEIGHT + ROW_HEIGHT / 2);
   });
+}
 
-  /* =========================
-     DOM
-  ========================= */
-  const corner = document.getElementById("corner");
-  const xAxis = document.getElementById("xAxis");
-  const yAxis = document.getElementById("yAxis");
-  const timeline = document.getElementById("timeline");
+function drawTimeline() {
+  tlCtx.clearRect(0, 0, timelineW, timelineH);
+  rects.length = 0;
 
-  /* =========================
-     DERIVED / MAPS
-  ========================= */
-  const MS_PER_HOUR = 3600e3;
-  const totalHours = Math.ceil((rangeEnd - rangeStart) / MS_PER_HOUR);
-  const timelineCssWidth = totalHours * HOUR_WIDTH;
-  const timelineCssHeight = resources.length * ROW_HEIGHT;
-
-  const resourceIndex = new Map(resources.map((r, i) => [r.id, i]));
-
-  /* =========================
-     CANVAS DPI SETUP
-     Store rects in CSS pixels for stable hit testing.
-  ========================= */
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
-
-  function setCanvasSize(canvas, cssW, cssH) {
-    canvas.style.width = cssW + "px";
-    canvas.style.height = cssH + "px";
-    canvas.width = Math.floor(cssW * dpr);
-    canvas.height = Math.floor(cssH * dpr);
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
-    ctx.font = FONT;
-    return ctx;
+  tlCtx.strokeStyle = "rgba(0,0,0,0.05)";
+  for (let i = 0; i <= resources.length; i++) {
+    const y = i * ROW_HEIGHT + 0.5;
+    tlCtx.beginPath();
+    tlCtx.moveTo(0, y);
+    tlCtx.lineTo(timelineW, y);
+    tlCtx.stroke();
   }
 
-  const cornerCtx = setCanvasSize(corner, AXIS_WIDTH, AXIS_HEIGHT);
-  const xAxisCtx  = setCanvasSize(xAxis,  timelineCssWidth, AXIS_HEIGHT);
-  const yAxisCtx  = setCanvasSize(yAxis,  AXIS_WIDTH, timelineCssHeight);
-  const tlCtx     = setCanvasSize(timeline, timelineCssWidth, timelineCssHeight);
+  for (const c of consumptions) {
+    const row = resourceIndex.get(c.resourceId);
+    if (row == null) continue;
 
-  /* =========================
-     COORDS
-  ========================= */
-  const timeToX = (t) => ((t - rangeStart) / (rangeEnd - rangeStart)) * timelineCssWidth;
+    const s = Math.max(c.start, rangeStart);
+    const e = Math.min(c.end, rangeEnd);
+    if (e <= s) continue;
 
-  /* =========================
-     HIT TEST INDEX (simple; replace with row buckets if needed)
-  ========================= */
-  /** @type {{id:string,x:number,y:number,w:number,h:number}[]} */
-  const rects = [];
+    const x = timeToX(s);
+    const w = Math.max(4, timeToX(e) - x);
+    const y = row * ROW_HEIGHT + BAR_VPAD;
+    const h = ROW_HEIGHT - BAR_VPAD * 2;
 
-  function hitTest(x, y) {
-    // Reverse order for "topmost" preference.
-    for (let i = rects.length - 1; i >= 0; i--) {
-      const r = rects[i];
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.id;
-    }
-    return null;
+    tlCtx.fillStyle = c.id === selectedId ? "#4f46e5" : "#60a5fa";
+    tlCtx.fillRect(x, y, w, h);
+
+    rects.push({ id: c.id, x, y, w, h });
   }
+}
 
-  /* =========================
-     RENDER
-  ========================= */
-  let selectedId = null;
+function renderAll() {
+  drawCorner();
+  drawXAxis();
+  drawYAxis();
+  drawTimeline();
+}
 
-  function drawCorner() {
-    cornerCtx.clearRect(0, 0, AXIS_WIDTH, AXIS_HEIGHT);
-    cornerCtx.fillStyle = "#111";
-    cornerCtx.textBaseline = "middle";
-    cornerCtx.textAlign = "left";
-    cornerCtx.fillText("Resources / Time", 10, AXIS_HEIGHT / 2);
-  }
+/* ================= EVENTS ================= */
+function canvasPoint(e) {
+  const r = timeline.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
 
-  function drawXAxis() {
-    xAxisCtx.clearRect(0, 0, timelineCssWidth, AXIS_HEIGHT);
-    xAxisCtx.fillStyle = "#111";
-    xAxisCtx.textBaseline = "middle";
-    xAxisCtx.textAlign = "center";
+timeline.addEventListener("mousedown", e => {
+  const { x, y } = canvasPoint(e);
+  const id = hitTest(x, y);
+  if (!id) return;
 
-    // hour ticks + labels
-    for (let i = 0; i <= totalHours; i++) {
-      const x = i * HOUR_WIDTH;
-      const t = new Date(rangeStart + i * MS_PER_HOUR);
-      const label = String(t.getHours()).padStart(2, "0") + ":00";
-      xAxisCtx.fillText(label, x + HOUR_WIDTH / 2, AXIS_HEIGHT / 2);
-    }
-  }
-
-  function drawYAxis() {
-    yAxisCtx.clearRect(0, 0, AXIS_WIDTH, timelineCssHeight);
-    yAxisCtx.fillStyle = "#111";
-    yAxisCtx.textBaseline = "middle";
-    yAxisCtx.textAlign = "left";
-
-    for (let i = 0; i < resources.length; i++) {
-      const y = i * ROW_HEIGHT + ROW_HEIGHT / 2;
-      yAxisCtx.fillText(resources[i].name, 10, y);
-    }
-  }
-
-  function drawTimeline() {
-    tlCtx.clearRect(0, 0, timelineCssWidth, timelineCssHeight);
-    rects.length = 0;
-
-    // optional row separators (cheap)
-    tlCtx.strokeStyle = "rgba(0,0,0,0.06)";
-    for (let i = 0; i <= resources.length; i++) {
-      const y = i * ROW_HEIGHT + 0.5;
-      tlCtx.beginPath();
-      tlCtx.moveTo(0, y);
-      tlCtx.lineTo(timelineCssWidth, y);
-      tlCtx.stroke();
-    }
-
-    for (const c of consumptions) {
-      const row = resourceIndex.get(c.resourceId);
-      if (row == null) continue;
-
-      // clip to range
-      const s = Math.max(c.start, rangeStart);
-      const e = Math.min(c.end, rangeEnd);
-      if (e <= s) continue;
-
-      const x = timeToX(s);
-      const w = Math.max(1, timeToX(e) - x);
-      const y = row * ROW_HEIGHT + BAR_VPAD;
-      const h = ROW_HEIGHT - 2 * BAR_VPAD;
-
-      tlCtx.fillStyle = (c.id === selectedId) ? "#4f46e5" : "#60a5fa";
-      tlCtx.fillRect(x, y, w, h);
-
-      rects.push({ id: c.id, x, y, w, h });
-    }
-  }
-
-  function renderAll() {
-    drawCorner();
-    drawXAxis();
-    drawYAxis();
+  if (e.button === 0) {
+    selectedId = id;
     drawTimeline();
+    console.log("select:", id);
   }
 
-  /* =========================
-     EVENTS
-  ========================= */
-  function canvasPointFromEvent(canvas, e) {
-    const r = canvas.getBoundingClientRect();
-    // coordinates in CSS pixels (matches our rects)
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  if (e.button === 2) {
+    e.preventDefault();
+    console.log("context menu:", id);
   }
+});
 
-  timeline.addEventListener("mousedown", (e) => {
-    const { x, y } = canvasPointFromEvent(timeline, e);
-    const id = hitTest(x, y);
-    if (!id) return;
+timeline.addEventListener("dblclick", e => {
+  const { x, y } = canvasPoint(e);
+  const id = hitTest(x, y);
+  if (id) console.log("open modal:", id);
+});
 
-    if (e.button === 0) {
-      selectedId = id;
-      drawTimeline();
-      // hook:
-      // onSelect(id)
-      console.log("select:", id);
-    } else if (e.button === 2) {
-      e.preventDefault();
-      // hook:
-      // onContextMenu(id, {x: e.clientX, y: e.clientY})
-      console.log("contextmenu:", id, "at", e.clientX, e.clientY);
-    }
-  });
+timeline.addEventListener("contextmenu", e => e.preventDefault());
 
-  timeline.addEventListener("dblclick", (e) => {
-    const { x, y } = canvasPointFromEvent(timeline, e);
-    const id = hitTest(x, y);
-    if (!id) return;
-    // hook:
-    // onOpenModal(id)
-    console.log("open modal:", id);
-  });
+/* ================= INIT ================= */
+renderAll();
 
-  timeline.addEventListener("contextmenu", (e) => e.preventDefault());
-
-  /* =========================
-     INIT
-  ========================= */
-  renderAll();
-
-  // If you need to re-render on data/range change, call renderAll() again.
 })();
 </script>
 
