@@ -34,8 +34,9 @@
             this.rects = [];
             this.selectedId = null;
 
-            /* rAF state */
-            this._renderScheduled = false;
+            /* render control */
+            this.renderVersion = 0;
+            this.rafPending = false;
 
             this._setupCanvases(
                 cornerCanvas,
@@ -93,7 +94,6 @@
             canvas.style.height = cssH + "px";
             canvas.width = Math.floor(cssW * this.dpr);
             canvas.height = Math.floor(cssH * this.dpr);
-
             const ctx = canvas.getContext("2d");
             ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
             ctx.font = this.config.font;
@@ -135,14 +135,16 @@
             ) * this.timelineW;
         }
 
-        /* ================= RENDER ================= */
+        /* ================= PUBLIC ================= */
 
         renderAll() {
             this._drawCorner();
             this._drawXAxis();
             this._drawYAxis();
-            this._drawTimeline();
+            this._scheduleTimelineRender();
         }
+
+        /* ================= AXES ================= */
 
         _drawCorner() {
             const ctx = this.cornerCtx;
@@ -185,19 +187,35 @@
             });
         }
 
-        /* ================= VIRTUALIZED DRAW ================= */
+        /* ================= RENDER CONTROL ================= */
 
-        _drawTimeline() {
+        _scheduleTimelineRender() {
+            this.renderVersion++;
+            if (this.rafPending) return;
+
+            this.rafPending = true;
+            requestAnimationFrame(() => {
+                this.rafPending = false;
+                this._drawTimeline(this.renderVersion);
+            });
+        }
+
+        /* ================= VIRTUALIZED + CANCELLABLE ================= */
+
+        _drawTimeline(version) {
             this._updateViewport();
 
             const rows = this._getVisibleRowRange();
             const time = this._getVisibleTimeRange();
-
             const ctx = this.timelineCtx;
+
             ctx.clearRect(0, 0, this.timelineW, this.timelineH);
             this.rects.length = 0;
 
-            for (const c of this.consumptions) {
+            for (let i = 0; i < this.consumptions.length; i++) {
+                if (version !== this.renderVersion) return; // 🔴 CANCEL
+
+                const c = this.consumptions[i];
                 const row = this.resourceIndex.get(c.resourceId);
                 if (row == null) continue;
                 if (row < rows.start || row > rows.end) continue;
@@ -224,20 +242,9 @@
 
         /* ================= EVENTS ================= */
 
-        _scheduleRender() {
-            if (this._renderScheduled) return;
-            this._renderScheduled = true;
-
-            requestAnimationFrame(() => {
-                this._renderScheduled = false;
-                this._drawTimeline();
-            });
-        }
-
         _bindEvents() {
-            /* rAF-throttled scroll */
             this.scrollContainer.addEventListener("scroll", () =>
-                this._scheduleRender()
+                this._scheduleTimelineRender()
             );
 
             this.timeline.addEventListener("mousedown", e => {
@@ -250,7 +257,7 @@
 
                 if (e.button === 0) {
                     this.selectedId = id;
-                    this._drawTimeline();
+                    this._scheduleTimelineRender();
                     this.onSelect?.(id);
                 }
 
