@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Resource Timeline</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: system-ui, sans-serif;
+        }
+
+        #root {
+            height: 100%;
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            grid-template-rows: 50px 1fr;
+        }
+
+        #corner {
+            grid-column: 1;
+            grid-row: 1;
+            background: #f3f4f6;
+            border-right: 1px solid #ccc;
+            border-bottom: 1px solid #ccc;
+        }
+
+        #x-axis {
+            grid-column: 2;
+            grid-row: 1;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #f9fafb;
+            border-bottom: 1px solid #ccc;
+        }
+
+        #y-axis {
+            grid-column: 1;
+            grid-row: 2;
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            background: #f9fafb;
+            border-right: 1px solid #ccc;
+        }
+
+        #scroll-area {
+            grid-column: 2;
+            grid-row: 2;
+            overflow: auto;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="root">
+        <div id="corner"></div>
+        <canvas id="x-axis"></canvas>
+        <canvas id="y-axis"></canvas>
+        <div id="scroll-area">
+            <canvas id="timeline"></canvas>
+        </div>
+    </div>
+
+    <script>
+        /* =========================
+           CONFIG
+        ========================= */
+        const ROW_HEIGHT = 40
+        const HOUR_WIDTH = 80
+        const AXIS_HEIGHT = 50
+        const AXIS_WIDTH = 200
+
+        /* =========================
+           SAMPLE DATA
+        ========================= */
+        const resources = Array.from({ length: 50 }, (_, i) => ({
+            id: "r" + i,
+            name: "Resource " + i
+        }))
+
+        const startTime = Date.now()
+        const endTime = startTime + 1000 * 60 * 60 * 48 // 48h
+
+        const consumptions = Array.from({ length: 2000 }, (_, i) => {
+            const start = startTime + Math.random() * (endTime - startTime - 3.6e6)
+            return {
+                id: "c" + i,
+                resourceId: resources[Math.floor(Math.random() * resources.length)].id,
+                start,
+                end: start + 3.6e6 * (1 + Math.random() * 4)
+            }
+        })
+
+        /* =========================
+           DERIVED
+        ========================= */
+        const hours = Math.ceil((endTime - startTime) / 3.6e6)
+        const timelineWidth = hours * HOUR_WIDTH
+        const timelineHeight = resources.length * ROW_HEIGHT
+
+        const resourceIndex = new Map(resources.map((r, i) => [r.id, i]))
+
+        /* =========================
+           CANVAS SETUP
+        ========================= */
+        const timeline = document.getElementById("timeline")
+        const xAxis = document.getElementById("x-axis")
+        const yAxis = document.getElementById("y-axis")
+        const scrollArea = document.getElementById("scroll-area")
+
+        timeline.width = timelineWidth
+        timeline.height = timelineHeight
+
+        xAxis.height = AXIS_HEIGHT
+        yAxis.width = AXIS_WIDTH
+        yAxis.height = timelineHeight
+
+        xAxis.width = timelineWidth
+
+        scrollArea.appendChild(timeline)
+
+        /* =========================
+           UTIL
+        ========================= */
+        const timeToX = t =>
+            ((t - startTime) / (endTime - startTime)) * timelineWidth
+
+        /* =========================
+           HIT TESTING
+        ========================= */
+        const rects = []
+
+        function hitTest(x, y) {
+            for (let i = rects.length - 1; i >= 0; i--) {
+                const r = rects[i]
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    return r.id
+                }
+            }
+            return null
+        }
+
+        /* =========================
+           RENDER
+        ========================= */
+        function renderTimeline(selectedId = null) {
+            const ctx = timeline.getContext("2d")
+            ctx.clearRect(0, 0, timelineWidth, timelineHeight)
+            rects.length = 0
+
+            for (const c of consumptions) {
+                const row = resourceIndex.get(c.resourceId)
+                if (row === undefined) continue
+
+                const x = timeToX(c.start)
+                const w = timeToX(c.end) - x
+                const y = row * ROW_HEIGHT + 6
+                const h = ROW_HEIGHT - 12
+
+                ctx.fillStyle = c.id === selectedId ? "#4f46e5" : "#60a5fa"
+                ctx.fillRect(x, y, w, h)
+
+                rects.push({ id: c.id, x, y, w, h })
+            }
+        }
+
+        function renderXAxis() {
+            const ctx = xAxis.getContext("2d")
+            ctx.clearRect(0, 0, xAxis.width, xAxis.height)
+
+            ctx.fillStyle = "#111"
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+
+            for (let i = 0; i <= hours; i++) {
+                const x = i * HOUR_WIDTH
+                const date = new Date(startTime + i * 3.6e6)
+                ctx.fillText(
+                    date.getHours().toString().padStart(2, "0") + ":00",
+                    x + HOUR_WIDTH / 2,
+                    AXIS_HEIGHT / 2
+                )
+            }
+        }
+
+        function renderYAxis() {
+            const ctx = yAxis.getContext("2d")
+            ctx.clearRect(0, 0, yAxis.width, yAxis.height)
+
+            ctx.fillStyle = "#111"
+            ctx.textAlign = "left"
+            ctx.textBaseline = "middle"
+
+            resources.forEach((r, i) => {
+                ctx.fillText(r.name, 10, i * ROW_HEIGHT + ROW_HEIGHT / 2)
+            })
+        }
+
+        /* =========================
+           EVENTS
+        ========================= */
+        let selected = null
+
+        timeline.addEventListener("mousedown", e => {
+            const rect = timeline.getBoundingClientRect()
+            const x = e.clientX - rect.left + scrollArea.scrollLeft
+            const y = e.clientY - rect.top + scrollArea.scrollTop
+
+            const id = hitTest(x, y)
+            if (!id) return
+
+            if (e.button === 0) {
+                selected = id
+                renderTimeline(selected)
+            }
+
+            if (e.button === 2) {
+                e.preventDefault()
+                console.log("context menu:", id)
+            }
+        })
+
+        timeline.addEventListener("dblclick", e => {
+            const rect = timeline.getBoundingClientRect()
+            const x = e.clientX - rect.left + scrollArea.scrollLeft
+            const y = e.clientY - rect.top + scrollArea.scrollTop
+
+            const id = hitTest(x, y)
+            if (id) console.log("open modal:", id)
+        })
+
+        timeline.addEventListener("contextmenu", e => e.preventDefault())
+
+        /* =========================
+           SYNC SCROLL
+        ========================= */
+        scrollArea.addEventListener("scroll", () => {
+            xAxis.style.transform = `translateX(${-scrollArea.scrollLeft}px)`
+            yAxis.style.transform = `translateY(${-scrollArea.scrollTop}px)`
+        })
+
+        /* =========================
+           INIT
+        ========================= */
+        renderTimeline()
+        renderXAxis()
+        renderYAxis()
+    </script>
+
+</body>
+
+</html>
