@@ -31,6 +31,16 @@
                 resources.map((r, i) => [r.id, i])
             );
 
+            this.rows = Array.from({ length: resources.length }, () => []);
+
+            for (let i = 0; i < consumptions.length; i++) {
+                const c = consumptions[i];
+                const row = this.resourceIndex.get(c.resourceId);
+                if (row != null) {
+                    this.rows[row].push(c);
+                }
+            }
+
             this.rects = [];
             this.selectedId = null;
 
@@ -209,36 +219,48 @@
             const time = this._getVisibleTimeRange();
             const ctx = this.timelineCtx;
 
-            ctx.clearRect(0, 0, this.timelineW, this.timelineH);
+            // Clear ONLY visible area (huge perf win)
+            ctx.clearRect(
+                this.viewLeft,
+                this.viewTop,
+                this.viewWidth,
+                this.viewHeight
+            );
+
             this.rects.length = 0;
 
-            for (let i = 0; i < this.consumptions.length; i++) {
-                if (version !== this.renderVersion) return; // 🔴 CANCEL
+            const rowHeight = this.config.rowHeight;
+            const barVPad = this.config.barVPad;
 
-                const c = this.consumptions[i];
-                const row = this.resourceIndex.get(c.resourceId);
-                if (row == null) continue;
-                if (row < rows.start || row > rows.end) continue;
-                if (c.end <= time.start || c.start >= time.end) continue;
+            for (let row = rows.start; row <= rows.end; row++) {
+                if (version !== this.renderVersion) return;
 
-                const x = this.timeToX(Math.max(c.start, this.rangeStart));
-                const w = Math.max(
-                    4,
-                    this.timeToX(Math.min(c.end, this.rangeEnd)) - x
-                );
+                const list = this.rows[row];
+                if (!list || list.length === 0) continue;
 
-                const y =
-                    row * this.config.rowHeight + this.config.barVPad;
-                const h =
-                    this.config.rowHeight - this.config.barVPad * 2;
+                const y = row * rowHeight + barVPad;
+                const h = rowHeight - barVPad * 2;
 
-                ctx.fillStyle =
-                    c.id === this.selectedId ? "#4f46e5" : "#60a5fa";
-                ctx.fillRect(x, y, w, h);
+                for (let i = 0; i < list.length; i++) {
+                    const c = list[i];
 
-                this.rects.push({ id: c.id, x, y, w, h });
+                    if (c.end <= time.start || c.start >= time.end) continue;
+
+                    const x = this.timeToX(Math.max(c.start, this.rangeStart));
+                    const w = Math.max(
+                        4,
+                        this.timeToX(Math.min(c.end, this.rangeEnd)) - x
+                    );
+
+                    ctx.fillStyle =
+                        c.id === this.selectedId ? "#4f46e5" : "#60a5fa";
+                    ctx.fillRect(x, y, w, h);
+
+                    this.rects.push([c.id, x, y, w, h]);
+                }
             }
         }
+
 
         /* ================= EVENTS ================= */
 
@@ -286,14 +308,17 @@
             for (let i = this.rects.length - 1; i >= 0; i--) {
                 const r = this.rects[i];
                 if (
-                    x >= r.x &&
-                    x <= r.x + r.w &&
-                    y >= r.y &&
-                    y <= r.y + r.h
-                ) return r.id;
+                    x >= r[1] &&
+                    x <= r[1] + r[3] &&
+                    y >= r[2] &&
+                    y <= r[2] + r[4]
+                ) {
+                    return r[0];
+                }
             }
             return null;
         }
+
     }
 
     window.Timeline = Timeline;
